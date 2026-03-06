@@ -142,6 +142,7 @@ def load_and_prepare(
     csv_path: Path,
     features: Optional[List[str]] = None,
     target: Optional[str] = None,
+    exclude: Optional[List[str]] = None,
     max_rows: Optional[int] = None,
     seed: int = 42,
     shuffle: bool = True,
@@ -150,6 +151,9 @@ def load_and_prepare(
 
     Returns (prepared_df, target_column_name).  When *features* or *target*
     are ``None`` they are auto-detected from the CSV header.
+
+    *exclude* drops named columns before feature selection — handy for
+    removing a handful of problematic columns without listing every keeper.
     """
     df = pd.read_csv(csv_path, low_memory=False)
     df.columns = [c.strip() for c in df.columns]
@@ -170,6 +174,14 @@ def load_and_prepare(
 
     if target is None:
         target = _detect_target(df)
+
+    if exclude:
+        bad = [c for c in exclude if c not in df.columns]
+        if bad:
+            raise ValueError(f"--exclude_features column(s) not found in CSV: {bad}")
+        if target in exclude:
+            raise ValueError(f"Cannot exclude the target column '{target}'")
+        df = df.drop(columns=exclude)
 
     if features is not None:
         missing = [c for c in features if c not in df.columns]
@@ -580,6 +592,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
                    help="Model(s) to train")
     p.add_argument("--features", nargs="+", default=None,
                    help="Feature columns (default: all columns except --target)")
+    p.add_argument("--exclude_features", nargs="+", default=None,
+                   help="Columns to drop before training (simpler than listing every --features)")
     p.add_argument("--target", default=None,
                    help="Target column (default: last column in CSV)")
     p.add_argument("--split", nargs=3, type=float, default=[0.7, 0.15, 0.15],
@@ -615,6 +629,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         csv_path,
         features=features,
         target=target,
+        exclude=args.exclude_features,
         max_rows=args.max_rows,
         seed=args.seed,
         shuffle=not args.no_shuffle,
