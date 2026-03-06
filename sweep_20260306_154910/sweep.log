@@ -1,0 +1,6 @@
+2026-03-06 15:49:10,748  INFO      Sweep started: 20260306_154910
+2026-03-06 15:49:10,748  INFO      CSV: /home/raykp/sp26/ml/data/ride_share/export/diamonds.csv
+2026-03-06 15:49:10,748  INFO      Models: ['knn']
+2026-03-06 15:49:10,748  INFO      Full args: {'csv': 'diamonds.csv', 'features': None, 'target': None, 'split': [0.7, 0.15, 0.15], 'max_rows': None, 'seed': 42, 'models': ['knn'], 'sweep_features': False, 'min_features': 2, 'n_estimators': [100, 200, 400], 'max_depth': [10, 20, None], 'min_samples_leaf': [1, 2, 5], 'alpha': [0.001, 0.01, 0.1, 1.0, 10.0], 'l1_ratio': [0.1, 0.3, 0.5, 0.7, 0.9], 'n_neighbors': [3, 5, 10, 15, 20], 'knn_weights': ['uniform', 'distance'], 'results_dir': '.', 'checkpoint_every': 50}
+2026-03-06 15:49:10,817  INFO      Sweeping 10 combinations  (10 model configs x 1 feature subsets)
+2026-03-06 15:49:19,340  WARNING   Sweep interrupted by user (KeyboardInterrupt)

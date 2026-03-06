@@ -1,0 +1,14 @@
+Model : ridge
+Features : Unnamed: 0, carat, cut, color, clarity, depth, table, price, x, y
+
+Train/Val/Test sizes : 37758/8091/8091
+
+            R²        RMSE       MAE        wMAPE
+  Train     0.9865     0.0808     0.0157     0.0044
+  Val       0.9944     0.0518     0.0146     0.0041
+  Test      0.8154     0.3281     0.0193     0.0055
+
+Saved artefacts:
+  model.joblib, metrics.csv, feature_importance.csv
+  predictions_train.csv, predictions_val.csv, predictions_test.csv
+  plots/val_pred_vs_actual.png, plots/val_residuals_hist.png

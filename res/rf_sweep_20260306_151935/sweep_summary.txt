@@ -1,0 +1,24 @@
+=== RF Hyperparameter + Feature Sweep ===
+Total combinations tried : 27
+Valid results            : 27
+
+=== BEST CONFIGURATION (by wMAPE on validation) ===
+  n_estimators     : 400
+  max_depth        : None
+  min_samples_leaf : 1
+  features (10): Unnamed: 0, carat, cut, color, clarity, depth, table, price, x, y
+
+  wMAPE (val)  : 0.0027
+  R² (val)     : 0.9819
+
+=== AGGREGATE STATISTICS (validation wMAPE) ===
+  mean   : 0.0035
+  median : 0.0031
+  min    : 0.0027
+  max    : 0.0049
+  std    : 0.0009
+
+To reproduce the best model in a single training run:
+  python regress_train.py --csv <your_clean.csv> --models rfr \
+      --features Unnamed: 0 carat cut color clarity depth table price x y \
+      # (then set RF defaults in code to n_est=400, depth=None, leaf=1)
