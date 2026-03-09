@@ -1,7 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd "$(dirname "$0")"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+LOGFILE="$SCRIPT_DIR/sweep_output.log"
+SHUTDOWN=false
+
+for arg in "$@"; do
+    case "$arg" in
+        --unattended) SHUTDOWN=true ;;
+    esac
+done
+
+if "$SHUTDOWN" && [ -z "${_SWEEPS_INNER:-}" ]; then
+    export _SWEEPS_INNER=1
+    nohup bash "$0" --unattended > "$LOGFILE" 2>&1 &
+    echo "Running in background (PID $!) — log: $LOGFILE"
+    echo "Machine will shut down when sweeps finish."
+    exit 0
+fi
+
+cd "$SCRIPT_DIR"
 
 COMMON=(
     --csv diamonds.csv
@@ -28,5 +46,9 @@ python3 rf_param_train.py --features carat cut color clarity depth table "${COMM
 echo "=== Run 3/3: all 9 features ==="
 python3 rf_param_train.py --features carat cut color clarity depth table x y z "${COMMON[@]}"
 
-echo "=== All sweeps complete — shutting down ==="
-sudo shutdown -h now
+echo "=== All sweeps complete ==="
+
+if "$SHUTDOWN"; then
+    echo "Shutting down now..."
+    sudo shutdown -h now
+fi
