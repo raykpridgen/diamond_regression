@@ -924,6 +924,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     p.add_argument("--csv", required=True, help="Path to preprocessed CSV")
     p.add_argument("--features", nargs="+", default=None,
                    help="Feature columns (default: all except --target)")
+    p.add_argument("--exclude_features", nargs="+", default=None,
+                   help="Columns to drop before training (simpler than listing every --features)")
     p.add_argument("--target", default=None,
                    help="Target column (default: last column)")
     p.add_argument("--split", nargs=3, type=float, default=[0.7, 0.15, 0.15],
@@ -991,6 +993,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # --- Load & split data once ---
     df, target_col = load_and_prepare(
         csv_path, features=args.features, target=args.target,
+        exclude=args.exclude_features,
         max_rows=args.max_rows, seed=args.seed,
         shuffle=True,
     )
