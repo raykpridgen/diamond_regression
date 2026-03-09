@@ -460,6 +460,7 @@ def compute_ablation_importance(
 
 def _parse_best_params(best_row: pd.Series) -> Dict[str, Any]:
     """Extract hyperparams from a results row's param_* columns."""
+    _INT_PARAMS = {"n_estimators", "max_depth", "min_samples_leaf", "n_neighbors"}
     params: Dict[str, Any] = {}
     for col in best_row.index:
         if not col.startswith("param_"):
@@ -475,6 +476,12 @@ def _parse_best_params(best_row: pd.Series) -> Dict[str, Any]:
                 params[key] = int(v) if "." not in v else float(v)
             except ValueError:
                 params[key] = v
+        elif key in _INT_PARAMS:
+            params[key] = int(v)
+        elif isinstance(v, np.integer):
+            params[key] = int(v)
+        elif isinstance(v, np.floating):
+            params[key] = float(v)
         else:
             params[key] = v
     return params
