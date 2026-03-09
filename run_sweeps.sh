@@ -13,8 +13,14 @@ done
 
 if "$SHUTDOWN" && [ -z "${_SWEEPS_INNER:-}" ]; then
     export _SWEEPS_INNER=1
-    nohup bash "$0" --unattended > "$LOGFILE" 2>&1 &
-    echo "Running in background (PID $!) — log: $LOGFILE"
+    if command -v tmux &>/dev/null; then
+        tmux new-session -d -s sweeps "bash '$0' --unattended 2>&1 | tee '$LOGFILE'"
+        echo "Running in tmux session 'sweeps' — log: $LOGFILE"
+        echo "Reattach with: tmux attach -t sweeps"
+    else
+        nohup bash "$0" --unattended > "$LOGFILE" 2>&1 &
+        echo "Running in background (PID $!) — log: $LOGFILE"
+    fi
     echo "Machine will shut down when sweeps finish."
     exit 0
 fi
