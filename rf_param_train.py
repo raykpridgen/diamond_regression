@@ -233,6 +233,7 @@ def run_sweep(
     outdir: Path,
     log: logging.Logger,
     checkpoint_every: int = 50,
+    run_name: Optional[str] = None,
 ) -> Tuple[pd.DataFrame, List[Dict[str, Any]]]:
     """
     Run the full grid sweep over pre-split data.
@@ -273,6 +274,7 @@ def run_sweep(
             t0 = time.perf_counter()
 
             row: Dict[str, Any] = {
+                "run_name": run_name or "",
                 "combo_id": combo_id,
                 "model": model_name,
                 "feature_set": feat_label,
@@ -497,6 +499,7 @@ def generate_reports(
     outdir: Path,
     csv_path: Path,
     log: logging.Logger,
+    run_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Write all report files and return the best config dict."""
     results.to_csv(outdir / "sweep_results.csv", index=False)
@@ -516,6 +519,7 @@ def generate_reports(
     best_params = _parse_best_params(best)
 
     best_config: Dict[str, Any] = {
+        "run_name": run_name,
         "model": best["model"],
         "params": best_params,
         "features": best["features"].split("+"),
@@ -535,7 +539,7 @@ def generate_reports(
     for model_name, grp in ok.groupby("model"):
         bidx = grp["wmapE_val"].idxmin()
         b = grp.loc[bidx]
-        row_dict: Dict[str, Any] = {"model": model_name}
+        row_dict: Dict[str, Any] = {"run_name": run_name or "", "model": model_name}
         for sl in SPLIT_LABELS:
             for mk in METRIC_KEYS:
                 col = f"{mk}_{sl}"
@@ -573,6 +577,7 @@ def generate_reports(
         outdir, csv_path, target_col, all_features,
         results, ok, errored, skipped,
         best_config, bpm_df, feature_imp, ablation_imp,
+        run_name=run_name,
     )
 
     log.info(f"Reports written to {outdir}")
@@ -592,6 +597,7 @@ def _write_sweep_summary(
     bpm_df: pd.DataFrame,
     feature_imp: Optional[pd.DataFrame],
     ablation_imp: Optional[pd.DataFrame],
+    run_name: Optional[str] = None,
 ) -> None:
     def fmt(val: Any) -> str:
         if isinstance(val, float) and not np.isnan(val):
@@ -603,6 +609,10 @@ def _write_sweep_summary(
         "  SWEEP RESULTS SUMMARY",
         "=" * 72,
         "",
+    ]
+    if run_name:
+        lines.append(f"Run            : {run_name}")
+    lines += [
         f"CSV            : {csv_path}",
         f"Target         : {target_col}",
         f"Features ({len(all_features):>2d})  : {', '.join(all_features)}",
@@ -720,6 +730,205 @@ def _write_sweep_summary(
     lines.extend(["", "=" * 72])
 
     write_text(outdir / "sweep_summary.txt", "\n".join(lines))
+
+
+# ---------------------------------------------------------------------------
+# Comprehensive per-run record
+# ---------------------------------------------------------------------------
+
+def _json_safe(val: Any) -> Any:
+    """Convert numpy/pandas scalars to native Python for JSON serialization."""
+    if isinstance(val, np.integer):
+        return int(val)
+    if isinstance(val, np.floating):
+        v = float(val)
+        return None if np.isnan(v) else v
+    if isinstance(val, np.bool_):
+        return bool(val)
+    if isinstance(val, np.ndarray):
+        return [_json_safe(x) for x in val.tolist()]
+    if isinstance(val, float) and np.isnan(val):
+        return None
+    try:
+        if pd.isna(val):
+            return None
+    except (TypeError, ValueError):
+        pass
+    return val
+
+
+def save_run_record(
+    run_id: str,
+    outdir: Path,
+    results: pd.DataFrame,
+    errors: List[Dict[str, Any]],
+    best_config: Dict[str, Any],
+    feature_imp: Optional[pd.DataFrame],
+    ablation_imp: Optional[pd.DataFrame],
+    elapsed_s: float,
+    args: argparse.Namespace,
+    target_col: str,
+    all_features: List[str],
+    n_train: int,
+    n_val: int,
+    n_test: int,
+) -> Path:
+    """Save one comprehensive JSON per run with all metrics, params, importance,
+    and every combo result.  Written to the sweep directory **and** to a shared
+    ``run_records/`` directory so cross-run analysis is trivial."""
+
+    ok = results[results["status"] == "ok"]
+    param_cols = [c for c in results.columns if c.startswith("param_")]
+
+    # ---- record skeleton ----
+    record: Dict[str, Any] = {
+        "run_id": run_id,
+        "run_name": args.run_name,
+        "timestamp": datetime.now().isoformat(),
+        "elapsed_s": round(elapsed_s, 2),
+
+        "data": {
+            "csv": str(Path(args.csv).resolve()),
+            "target": target_col,
+            "features": all_features,
+            "n_features": len(all_features),
+            "split_ratios": list(args.split),
+            "n_train": n_train,
+            "n_val": n_val,
+            "n_test": n_test,
+            "seed": args.seed,
+        },
+
+        "sweep_config": {
+            "models": args.models,
+            "sweep_features": args.sweep_features,
+            "param_grids": {
+                "n_estimators": args.n_estimators,
+                "max_depth": [d if d is not None else None
+                              for d in args.max_depth],
+                "min_samples_leaf": args.min_samples_leaf,
+                "alpha": args.alpha,
+                "l1_ratio": args.l1_ratio,
+                "n_neighbors": args.n_neighbors,
+                "knn_weights": args.knn_weights,
+            },
+        },
+
+        "counts": {
+            "total_combos": len(results),
+            "successful": int(len(ok)),
+            "errors": len(errors),
+            "skipped": int(len(results[results["status"] == "skipped"])),
+        },
+
+        "best_overall": best_config,
+    }
+
+    # ---- best per model ----
+    best_per_model: List[Dict[str, Any]] = []
+    if not ok.empty:
+        for model_name, grp in ok.groupby("model"):
+            bidx = grp["wmapE_val"].idxmin()
+            b = grp.loc[bidx]
+            entry: Dict[str, Any] = {
+                "model": str(model_name),
+                "n_combos_evaluated": len(grp),
+                "feature_set": str(b["feature_set"]),
+                "n_features": int(b["n_features"]),
+                "params": {pc[6:]: _json_safe(b[pc])
+                           for pc in param_cols if pd.notna(b.get(pc))},
+                "metrics": {f"{mk}_{sl}": _json_safe(b.get(f"{mk}_{sl}"))
+                            for sl in SPLIT_LABELS for mk in METRIC_KEYS},
+            }
+            best_per_model.append(entry)
+    record["best_per_model"] = best_per_model
+
+    # ---- feature importance (from best model) ----
+    if feature_imp is not None and not feature_imp.empty:
+        label = ("coefficient" if "coefficient" in feature_imp.columns
+                 else "importance")
+        record["feature_importance"] = [
+            {"rank": int(r["rank"]),
+             "feature": str(r["feature"]),
+             label: _json_safe(r[label]),
+             f"abs_{label}": _json_safe(r.get(f"abs_{label}"))}
+            for _, r in feature_imp.iterrows()
+        ]
+    else:
+        record["feature_importance"] = []
+
+    # ---- ablation importance ----
+    if ablation_imp is not None and not ablation_imp.empty:
+        record["ablation_importance"] = [
+            {"rank": int(r["rank"]),
+             "feature": str(r["feature"]),
+             "wmapE_val_without": _json_safe(r["wmapE_val_without"]),
+             "wmapE_val_baseline": _json_safe(r["wmapE_val_baseline"]),
+             "wmapE_delta": _json_safe(r["wmapE_delta"]),
+             "r2_val_without": _json_safe(r["r2_val_without"]),
+             "r2_val_baseline": _json_safe(r["r2_val_baseline"]),
+             "r2_delta": _json_safe(r["r2_delta"])}
+            for _, r in ablation_imp.iterrows()
+        ]
+    else:
+        record["ablation_importance"] = []
+
+    # ---- metric distributions (val + test) ----
+    distributions: Dict[str, Dict[str, float]] = {}
+    if not ok.empty:
+        for col in ["r2_val", "rmse_val", "mae_val", "wmapE_val",
+                     "r2_test", "rmse_test", "mae_test", "wmapE_test"]:
+            vals = ok[col].dropna()
+            if vals.empty:
+                continue
+            distributions[col] = {
+                "min": float(vals.min()),
+                "p10": float(vals.quantile(0.10)),
+                "p25": float(vals.quantile(0.25)),
+                "median": float(vals.median()),
+                "p75": float(vals.quantile(0.75)),
+                "p90": float(vals.quantile(0.90)),
+                "max": float(vals.max()),
+                "mean": float(vals.mean()),
+                "std": float(vals.std()),
+            }
+    record["metric_distributions"] = distributions
+
+    # ---- every combo result ----
+    all_results: List[Dict[str, Any]] = []
+    for _, r in results.iterrows():
+        entry = {
+            "combo_id": int(r["combo_id"]),
+            "model": str(r["model"]),
+            "feature_set": str(r["feature_set"]),
+            "n_features": int(r["n_features"]),
+            "features": str(r["features"]),
+            "status": str(r["status"]),
+            "elapsed_s": _json_safe(r.get("elapsed_s")),
+            "params": {pc[6:]: _json_safe(r[pc])
+                       for pc in param_cols if pd.notna(r.get(pc))},
+        }
+        if r["status"] == "ok":
+            entry["metrics"] = {
+                f"{mk}_{sl}": _json_safe(r.get(f"{mk}_{sl}"))
+                for sl in SPLIT_LABELS for mk in METRIC_KEYS
+            }
+        all_results.append(entry)
+    record["all_results"] = all_results
+
+    # ---- write ----
+    tag = f"{args.run_name}_{run_id}" if args.run_name else run_id
+    filename = f"run_record_{tag}.json"
+
+    filepath = outdir / filename
+    payload = json.dumps(record, indent=2, default=str)
+    filepath.write_text(payload, encoding="utf-8")
+
+    shared_dir = outdir.parent / "run_records"
+    safe_mkdir(shared_dir)
+    (shared_dir / filename).write_text(payload, encoding="utf-8")
+
+    return filepath
 
 
 # ---------------------------------------------------------------------------
@@ -960,6 +1169,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     knn.add_argument("--knn_weights", nargs="+", default=DEFAULT_KNN_WEIGHTS,
                      choices=["uniform", "distance"])
 
+    p.add_argument("--run_name", default=None,
+                   help="Optional label for this sweep (used in output dir name)")
     p.add_argument("--results_dir", default=".", help="Parent folder for output")
     p.add_argument("--checkpoint_every", type=int, default=50,
                    help="Save partial results every N combos (default: 50)")
@@ -981,11 +1192,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 2
 
     run_id = now_stamp()
-    outdir = Path(args.results_dir).resolve() / f"sweep_{run_id}"
+    if args.run_name:
+        dir_name = f"sweep_{args.run_name}_{run_id}"
+    else:
+        dir_name = f"sweep_{run_id}"
+    outdir = Path(args.results_dir).resolve() / dir_name
     safe_mkdir(outdir)
 
     log = _setup_logger(outdir)
-    log.info(f"Sweep started: {run_id}")
+    log.info(f"Sweep started: {run_id}" + (f" ({args.run_name})" if args.run_name else ""))
     log.info(f"CSV: {csv_path}")
     log.info(f"Models: {args.models}")
     log.info(f"Full args: {vars(args)}")
@@ -1001,7 +1216,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     X_train, y_train, X_val, y_val, X_test, y_test = split_data(df, target_col, split)
     del df
 
+    run_label = args.run_name or run_id
     console.print(Panel(
+        f"Run           : [key]{run_label}[/key]\n"
         f"CSV           : [path]{csv_path}[/path]\n"
         f"Target        : [key]{target_col}[/key]\n"
         f"Features ({len(all_features):>2d})  : [dim]{', '.join(all_features)}[/dim]\n"
@@ -1053,6 +1270,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             outdir=outdir,
             log=log,
             checkpoint_every=args.checkpoint_every,
+            run_name=args.run_name,
         )
     except KeyboardInterrupt:
         console.print("\n[warn]Interrupted. Partial results (if any) saved to checkpoint.[/warn]")
@@ -1110,6 +1328,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         outdir=outdir,
         csv_path=csv_path,
         log=log,
+        run_name=args.run_name,
     )
 
     # --- Plots ---
@@ -1125,6 +1344,31 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print_best_per_model(results)
 
     elapsed = time.perf_counter() - t0
+
+    # --- Comprehensive per-run record ---
+    try:
+        record_path = save_run_record(
+            run_id=run_id,
+            outdir=outdir,
+            results=results,
+            errors=errors,
+            best_config=best_config,
+            feature_imp=feature_imp,
+            ablation_imp=ablation_imp,
+            elapsed_s=elapsed,
+            args=args,
+            target_col=target_col,
+            all_features=all_features,
+            n_train=len(X_train),
+            n_val=len(X_val),
+            n_test=len(X_test),
+        )
+        console.print(f"Run record saved to [path]{record_path}[/path]")
+        log.info(f"Run record: {record_path}")
+    except Exception as exc:
+        log.error(f"Failed to save run record: {exc}\n{traceback.format_exc()}")
+        console.print(f"[warn]Could not save run record: {exc}[/warn]")
+
     n_ok = len(ok)
     n_err = len(errors)
     console.print(
