@@ -43,14 +43,28 @@ COMMON=(
     --alpha 0.1 0.3 0.5 1.0 1.5 2.0
 )
 
+SIMPLE=(
+    --csv diamonds.csv
+    --models rfr knn
+    --n_estimators 800 1200 1600 2000
+    --max_depth 20 50 70 0
+    --min_samples_leaf 1 2 4
+    --features clarity color carat y x
+    --target price
+    --split 0.7 0.15 0.15
+    --sweep_features
+    --n_neighbors 1 2 3 5 10 30
+    --knn_weights uniform distance
+)
+
 echo "=== Run 1/3: dimensions ==="
-python3 rf_param_train.py --run_name dimensions --features x y z "${COMMON[@]}"
+python3 rf_param_train.py --run_name local "${SIMPLE[@]}"
 
-echo "=== Run 2/3: qualities ==="
-python3 rf_param_train.py --run_name qualities --features carat cut color clarity depth table "${COMMON[@]}"
+# echo "=== Run 2/3: qualities ==="
+# python3 rf_param_train.py --run_name qualities --features carat cut color clarity depth table "${COMMON[@]}"
 
-echo "=== Run 3/3: all_features ==="
-python3 rf_param_train.py --run_name all_features --features carat cut color clarity depth table x y z "${COMMON[@]}"
+# echo "=== Run 3/3: all_features ==="
+# python3 rf_param_train.py --run_name all_features --features carat cut color clarity depth table x y z "${COMMON[@]}"
 
 echo "=== All sweeps complete — aggregating run records ==="
 
