@@ -1,1 +1,8 @@
 sweeps*/
+*.csv
+!big_sweep/**/*.csv
+__pycache__/
+*.pyc
+*.aux
+*.log
+big_sweep/
